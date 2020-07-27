@@ -141,13 +141,24 @@ static void s_print_outer_hdr_size( void )
 	return;
 }
 
-static int s_encap_vxlan( const char *in_file, const char *out_file );
+static int s_encap_vxlan(
+	const char *in_file,
+	const char *out_file,
+	uint32_t sa,
+	uint32_t da,
+	uint16_t sp,
+	uint16_t dp );
 
 int main( int argc, char *argv[] )
 {
 	int i;
+	int ret;
+	int sp;
+	int dp;
 	char *in_file;
 	char *out_file;
+	struct in_addr sa;
+	struct in_addr da;
 
 	s_print_eth_hdr_size();
 	s_print_ip_hdr_size();
@@ -178,12 +189,74 @@ int main( int argc, char *argv[] )
 		out_file = "out.pcap";
 	}
 
-	s_encap_vxlan( in_file, out_file );
+	if ( argc > 3 )
+	{
+		ret = inet_aton( argv[ 3 ], &sa );
+		if ( ret == 0 )
+		{
+			printf( "arg-3: address[%s] is not valid.\n", argv[ 3 ] );
+			return 3;
+		}
+	}
+	else
+	{
+		sa.s_addr = 0;
+	}
+
+	if ( argc > 4 )
+	{
+		ret = inet_aton( argv[ 4 ], &da );
+		if ( ret == 0 )
+		{
+			printf( "arg-4: address[%s] is not valid.\n", argv[ 4 ] );
+			return 4;
+		}
+	}
+	else
+	{
+		da.s_addr = 0;
+	}
+
+	if ( argc > 5 )
+	{
+		sp = atoi( argv[ 5 ] );
+		if ( ( sp < 0 ) || ( sp > 65535 ) )
+		{
+			printf( "arg-5: port[%s] is not valid.\n", argv[ 5 ] );
+			return 5;
+		}
+	}
+	else
+	{
+		sp = 0;
+	}
+
+	if ( argc > 6 )
+	{
+		dp = atoi( argv[ 6 ] );
+		if ( ( dp < 0 ) || ( dp > 65535 ) )
+		{
+			printf( "arg-6: port[%s] is not valid.\n", argv[ 6 ] );
+			return 6;
+		}
+	}
+	else
+	{
+		dp = S_UDP_DPORT;
+	}
+
+	s_encap_vxlan( in_file, out_file, sa.s_addr, da.s_addr, sp, dp );
 
 	return 0;
 }
 
-static int s_encap_vxlan( const char *in_file, const char *out_file )
+static int s_encap_vxlan(
+	const char *in_file,
+	const char *out_file,
+	uint32_t sa,
+	uint32_t da,
+	uint16_t sp,
+	uint16_t dp )
 {
 	char errbuf[ PCAP_ERRBUF_SIZE ];
 	pcap_t *in_pcap;
@@ -223,7 +296,10 @@ static int s_encap_vxlan( const char *in_file, const char *out_file )
 	outer->ip.flg_off = S_IP_FLG_OFF;
 	outer->ip.ttl = S_IP_TTL;
 	outer->ip.proto = IPPROTO_UDP;
-	outer->udp.dport = htons( S_UDP_DPORT );
+	outer->ip.saddr = sa;
+	outer->ip.daddr = da;
+	outer->udp.sport = htons( sp );
+	outer->udp.dport = htons( dp );
 	outer->vxlan.rsvd = htonl( S_VXLAN_RSVD );
 	outer->vxlan.vni_rsvd = htonl( S_VXLAN_VNI_RSVD );
 
@@ -234,10 +310,19 @@ static int s_encap_vxlan( const char *in_file, const char *out_file )
 		outer->eth.type = htons( ETHERTYPE_IP );
 		outer->ip.totlen =
 			htons( S_OUTER_HDR_LEN - sizeof( s_eth_hdr_t ) + hdr.caplen );
-		outer->ip.saddr = htonl( inner->saddr );
-		outer->ip.daddr = htonl( inner->daddr );
+		if ( sa == 0 )
+		{
+			outer->ip.saddr = htonl( inner->saddr );
+		}
+		if ( da == 0 )
+		{
+			outer->ip.daddr = htonl( inner->daddr );
+		}
 		outer->ip.id = htons( id );
-		outer->udp.sport = htons( inner->sport );
+		if ( sp == 0 )
+		{
+			outer->udp.sport = htons( inner->sport );
+		}
 		outer->udp.len =
 			htons( sizeof( s_udp_hdr_t ) + sizeof( s_vxlan_hdr_t ) +
 				   hdr.caplen );
